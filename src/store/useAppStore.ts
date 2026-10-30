@@ -72,6 +72,8 @@ interface AppState {
   clearList: () => void;
   updateSettings: (patch: Partial<Settings>) => void;
   clearDemoData: () => void;
+  /** Borra todos los tickets y los precios aprendidos de ellos. Conserva tiendas, productos y ajustes. */
+  clearHistory: () => void;
 }
 
 /** Supermercados que entran en la comparación y la cesta según las preferencias del usuario. */
@@ -211,6 +213,7 @@ export const useAppStore = create<AppState>()(
       clearList: () => set({ shoppingList: [] }),
       updateSettings: (patch) => set({ settings: { ...get().settings, ...patch } }),
       clearDemoData: () => set({ receipts: get().receipts.filter((r) => !r.id.startsWith('demo-')) }),
+      clearHistory: () => set({ receipts: [], prices: seedPrices, draft: null }),
     }),
     {
       name: 'despensa-v1',

@@ -75,6 +75,34 @@ describe('parseReceipt · salida real de OCR.space (isTable)', () => {
   });
 });
 
+describe('parseReceipt · ticket real de Consum (foto arrugada)', () => {
+  // Salidas literales de OCR.space para la misma foto, con el motor 2 (isTable) y el 3 (Markdown).
+  const ENGINE2 =
+    'e consum\t\r\nJuntos es cooperativa\t\r\n157 - V Cardenal Benlloch 54\t\r\nT1f.963695225\t\r\nC: 0157 08/000022 28.10.2026 12:29 013746\t\r\nCANT ARTICULO\tPVP EUROS\t\r\n1 PEPINO HOLANDES\t0,99\t\r\n1 VERDURAS COCIDO\t2,68\t\r\n1 ARROZ D.O. VALENCIA\t1,69\t\r\n2 GARBANZO C. CONS400\t0,80\t1,60\t\r\n1 CEREAL MAIZ CONS500\t1,50\t\r\n1 CAFE DESC.CONSUM250\t2,50\t\r\n2 L.SEMI.S/L.CONSUM1L\t0,94\t1,88\t\r\n1 HORCHATA CHUFI 1L\t1,89\t\r\n1 T.VNO S/A LIMON DSI\t1,50\t\r\n1 REC.ELÉC.COLON CONS\t1,70\t\r\n2 REC.ELEC.A.FRESC.CO\t1,70\t3,40\t\r\n1 HIG.COMPAC.CONSUM12\t4,60\t\r\n1 PAPEL C.BL.CONSUM4\t2,19\t\r\n1 PAÑ.MENTOL CONSUM10\t1,85\t\r\n1 BOLSA COMPRA RECICL\t0,15\t\r\nSocio-Cliente 2900483562010\t\r\nTotal factura:\t30,12\t\r\nIMPORTE A ABONAR\t\r\nTar). Crédito\t30,12\t30,12\t\r\nCambio\t0,00\t\r\n-Verta Tarjeta Bancaria-\t\r\nC:0157 Tarieta:************9830\t\r\nCAIXABANK\t\r\nIMPORTE: 30,12 €\t\r\n';
+  const ENGINE3 =
+    '# consum\nJuntos es cooperativa\n\n157 - V. Cardenal Benlloch 54\nTlf.963695225\n\nC:0157 08/00C022 28.10.2026 12:29 013746\n\nCANT ARTICULO PVP EUROS\n1 PEPINO HOLANDES 0,99\n1 VERDURAS COCIDO 2,68\n1 ARROZ D.O.VALENCIA 1,69\n2 GARBANZO C. CONS400 0,80 1,60\n1 CEREAL MAIZ CONS500 1,50\n1 CAFE DESC.CONSUM250 2,50\n2 L.SEMI.S/L.CONSUMIL 0,94 1,88\n1 HORCHATA CHUFI 1L 1,89\n1 T.VNO S/A LIMON DSI 1,50\n1 REC.ELEC.COLON CONS 1,70\n2 REC.ELEC.A.FRES C.CO 1,70 3,40\n1 HIG.COMPAC.CONSUM12 4,60\n1 PAPEL C.BL.CONSUM4 2,19\n1 PAN.MENTOL CONSUM10 1,85\n1 BOLSA COMPRA RECICL 0,15\nSocio-Cliente 2900483562010\n\nTotal factura: 30,12\n\nIMPORTE A ABONAR 30,12\nTarj. Crédito 30,12\nCambio 0,00\n\n----------Venta Tarjeta Bancaria----------\nCAIXABANK C:0157 Tarjeta:**********9830\nIMPORTE: 30,12 € Autori:324213 00/A0000000031010\n';
+
+  for (const [engine, T] of [['motor 2', ENGINE2], ['motor 3', ENGINE3]] as const) {
+    it(`empieza en el primer producto y no mete la cabecera (${engine})`, () => {
+      const r = parseReceipt(T);
+      expect(r.storeId).toBe('consum');
+      expect(r.date).toBe('2026-10-28');
+      expect(r.lines).toHaveLength(15);
+      expect(r.lines[0]).toMatchObject({ rawName: 'PEPINO HOLANDES', quantity: 1, total: 0.99 });
+      expect(r.lines[3]).toMatchObject({ quantity: 2, unitPrice: 0.8, total: 1.6 });
+      expect(r.lines[14].rawName).toBe('BOLSA COMPRA RECICL');
+      expect(r.total).toBe(30.12);
+      expect(r.totalMismatch).toBe(false);
+    });
+  }
+
+  it('sin cabecera de columnas tampoco toma la dirección ni la fecha como producto', () => {
+    const r = parseReceipt(ENGINE3.replace('CANT ARTICULO PVP EUROS\n', ''));
+    expect(r.lines[0].rawName).toBe('PEPINO HOLANDES');
+    expect(r.lines).toHaveLength(15);
+  });
+});
+
 describe('parseReceipt · Lidl', () => {
   const T = `
 LIDL Supermercados S.A.U.

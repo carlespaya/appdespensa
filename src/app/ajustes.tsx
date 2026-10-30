@@ -52,8 +52,9 @@ function Row({ title, subtitle, children }: { title: string; subtitle?: string; 
 const switchColors = { trackColor: { true: colors.mintDeep, false: 'rgba(255,255,255,0.15)' }, thumbColor: colors.text };
 
 export default function Settings() {
-  const { settings, updateSettings, stores, updateStore, applyNearby, clearDemoData, receipts } = useAppStore();
+  const { settings, updateSettings, stores, updateStore, applyNearby, clearDemoData, clearHistory, receipts } = useAppStore();
   const [nearby, setNearby] = useState<{ loading: boolean; message?: string }>({ loading: false });
+  const [confirmClear, setConfirmClear] = useState(false);
   const demoCount = receipts.filter((r) => r.id.startsWith('demo-')).length;
   const sortedStores = [...stores].sort((a, b) => (a.distanceKm ?? 99) - (b.distanceKm ?? 99));
 
@@ -178,17 +179,34 @@ export default function Settings() {
         </Pressable>
       </GlassCard>
 
+      <SectionHeader title="Datos" />
       {demoCount > 0 && (
-        <>
-          <SectionHeader title="Datos" />
-          <GlassButton
-            variant="ghost"
-            label={`Borrar ${demoCount} tickets de ejemplo`}
-            icon={<Ionicons name="trash-outline" size={18} color={colors.danger} />}
-            onPress={clearDemoData}
-          />
-        </>
+        <GlassButton
+          variant="ghost"
+          label={`Borrar ${demoCount} tickets de ejemplo`}
+          icon={<Ionicons name="trash-outline" size={18} color={colors.danger} />}
+          onPress={clearDemoData}
+          style={{ marginBottom: space.md }}
+        />
       )}
+      {receipts.length > 0 ? (
+        <GlassButton
+          variant="ghost"
+          label={confirmClear ? '¿Seguro? Toca otra vez para borrarlo todo' : `Borrar todo el historial (${receipts.length} tickets)`}
+          icon={<Ionicons name={confirmClear ? 'warning' : 'trash'} size={18} color={colors.danger} />}
+          onPress={() => {
+            if (!confirmClear) return setConfirmClear(true);
+            clearHistory();
+            setConfirmClear(false);
+          }}
+          style={confirmClear ? { borderWidth: 1, borderColor: colors.danger } : undefined}
+        />
+      ) : (
+        <Text style={type.caption}>El historial está vacío.</Text>
+      )}
+      <Text style={[type.caption, { marginTop: space.sm }]}>
+        Se borran todos los tickets y los precios aprendidos de ellos. Tus supermercados, productos y ajustes se conservan. No se puede deshacer.
+      </Text>
     </Screen>
   );
 }

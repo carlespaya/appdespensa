@@ -121,6 +121,9 @@ export default function Home() {
           {receipts.slice(0, 4).map((r, i) => (
             <ReceiptRow key={r.id} receipt={r} divider={i > 0} />
           ))}
+          {receipts.length === 0 && (
+            <Text style={[type.caption, { padding: space.lg, textAlign: 'center' }]}>Aún no hay tickets. Escanea el primero con el botón central.</Text>
+          )}
         </GlassCard>
       </Animated.View>
     </Screen>

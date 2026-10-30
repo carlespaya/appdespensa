@@ -8,7 +8,8 @@ const PRICE = /-?\d{1,4}[.,]\d{2}(?!\d)/g;
 const META =
   /(\biva\b|i\.v\.a|base\s*imp|\bcuota\b|tarjeta|entregad|\bcambio\b|efectivo|factura|n\.?i\.?f|c\.?i\.?f|\btelf?\b|tel[eé]fono|tfno|\bop[:.]|\bcaja\b|cajer|ticket|gracias|devoluci|descripci[oó]n|p\.?\s*unit|precio\s*(unit|€\/)|\bimporte\b\s*$|^\s*importe\b(?!\s*total)|subtotal|puntos|\bvisa\b|mastercard|maestro|contactless|autoriz|\baut\b|\barc\b|\baid\b|terminal|comercio|atendid|le atendi|vendedor|cliente|\bsocio|\bclub\b|saldo|lidl plus|mi dia|\bcopia\b|exento|\bn[ºo°]\s*(op|tienda|ticket|art)|art[ií]culos?\s*:|total\s*art|\buds?\.?\s*:|horario|www\.|http|@|\bc\/|calle|avda|avenida|^eur$|\b\d{5}\b(?!\s*[.,]\d)|pago\s|pagado|pendiente|bienvenid|cuenta|\bbanco\b|\bnc\b|\bsec\b|\bpan\s*:|\bseq\b)/i;
 const TOTAL = /^\s*(importe\s+)?total\b(?!\s*(art|iva|ahorr|desc|dto|uds?|unid|product|l[ií]neas))/i;
-const DISCOUNT = /(\bdto\b|descuento|\bdesc\.|promo|oferta|ahorro|cup[oó]n|rebaja|bonific|\b2[ªa]\s*ud|\b3x2\b|\b2x1\b|club\s*descuento)/i;
+// Solo al inicio de la línea: "CAFE DESC.CONSUM" es café descafeinado, no un descuento.
+const DISCOUNT = /^\s*(dto\b|descuento|desc\.|promo|oferta|ahorro|cup[oó]n|rebaja|bonific|2[ªa]\s*ud|3x2\b|2x1\b|club\s*descuento)/i;
 const WEIGHT = /(\d+[.,]\d{1,3})\s*kg\.?\s*(?:x|×|a|\*|@)?\s*(\d+[.,]\d{2})\s*(?:€|eur)?\s*\/\s*kg/i;
 const WEIGHT_LOOSE = /(\d+[.,]\d{3})\s*kg/i;
 const MULTIPLIER = /^\s*(\d{1,3})\s*(?:uds?\.?|un\.?|u\.?)?\s*(?:x|×|\*)\s*(\d+[.,]\d{2})(?!\d)/i;
@@ -33,6 +34,23 @@ export function fixOcrNumbers(line: string): string {
       return `${pre}${sign}${fix(a)}${sep}${fix(b)}`;
     })
     .replace(/(\d)\s*€/g, '$1 €');
+}
+
+/** Quita fechas y horas para que "28.10.2026" o "12:29" nunca se lean como precios. */
+export function stripDateTime(line: string): string {
+  return line
+    .replace(/\b\d{1,2}\s?[/.-]\s?\d{1,2}\s?[/.-]\s?\d{2,4}\b/g, ' ')
+    .replace(/\b20\d{2}[/.-]\d{1,2}[/.-]\d{1,2}\b/g, ' ')
+    .replace(/\b\d{1,2}:\d{2}(:\d{2})?\b/g, ' ');
+}
+
+const COLUMN_WORDS = /\b(cant|cantidad|uds?|unid|art[ií]culos?|descripci[oó]n|producto|pvp|precio|p\.?\s?unit|importe|euros?|eur|€)\b/gi;
+
+/** Línea de títulos de columna: al menos dos palabras de columna y ningún importe. */
+function isColumnHeader(line: string): boolean {
+  if (/\d[.,]\d{2}/.test(line)) return false;
+  const words = new Set((line.match(COLUMN_WORDS) ?? []).map((w) => w.toLowerCase()));
+  return words.size >= 2;
 }
 
 function detectDate(text: string): string | null {
@@ -98,10 +116,17 @@ function interpretNumbers(qtyHint: number | null, prices: number[]) {
  * producto, descuentos en negativo, códigos EAN, nombres en dos líneas y todo lo posterior al TOTAL.
  */
 export function parseReceipt(text: string): ParsedReceipt {
-  const rawLines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  const lines = rawLines.map(fixOcrNumbers);
+  // El motor 3 de OCR.space devuelve Markdown: se quitan los "#" de encabezado.
+  const rawLines = text
+    .split(/\r?\n/)
+    .map((l) => l.replace(/^#+\s*/, '').trim())
+    .filter(Boolean);
   const store = detectStore(rawLines);
-  const date = detectDate(lines.join('\n'));
+  const date = detectDate(rawLines.map(fixOcrNumbers).join('\n'));
+  const lines = rawLines.map((l) => stripDateTime(fixOcrNumbers(l)));
+  // Si el ticket tiene cabecera de columnas ("CANT ARTICULO PVP EUROS"), los productos empiezan justo después.
+  const totalIndex = lines.findIndex((l) => TOTAL.test(l));
+  const headerIndex = lines.findIndex((l, i) => isColumnHeader(l) && (totalIndex < 0 || i < totalIndex));
 
   const items: ParsedLine[] = [];
   let total: number | null = null;
@@ -117,7 +142,11 @@ export function parseReceipt(text: string): ParsedReceipt {
     items.push(line);
   };
 
-  for (const line of lines) {
+  for (const [i, line] of lines.entries()) {
+    // Todo lo anterior a la cabecera de columnas es cabecera del ticket (logo, eslogan, dirección…).
+    if (i <= headerIndex) continue;
+    /** Zona de cabecera sin marcador de columnas: aún no ha aparecido ningún producto. */
+    const inHeader = headerIndex < 0 && items.length === 0;
     if (pending) pending.age++;
     if (pending && pending.age > 2) pending = null;
 
@@ -197,7 +226,8 @@ export function parseReceipt(text: string): ParsedReceipt {
 
     // Quita la letra de tipo de IVA final (A/B/C) y marcas como "*".
     const clean = line.replace(/\s+[A-E]\s*\*?\s*$/, '').replace(/\s+\*\s*$/, '');
-    const leadQty = clean.match(/^\s*(\d{1,3})\s*(?:x|uds?\.?|u\.?)?\s+(?=[^\d\s])/i);
+    // Cantidad de 1–2 cifras: un "157 -" al inicio es el código de tienda, no una cantidad.
+    const leadQty = clean.match(/^\s*(\d{1,2})\s*(?:x|uds?\.?|u\.?)?\s+(?=[^\d\s-])/i);
     const rest = leadQty ? clean.slice(leadQty[0].length) : clean;
     // Cantidad en columna entre nombre y precios: "LECHE ENTERA   2   0,95   1,90"
     const colQty = !leadQty ? rest.match(/\s(\d{1,2})\s+-?\d{1,4}[.,]\d{2}(?!\d)/) : null;
@@ -206,6 +236,12 @@ export function parseReceipt(text: string): ParsedReceipt {
 
     if (!prices.length) {
       if (!hasName(name)) continue;
+      // En la cabecera solo cuenta como posible producto una línea con cantidad o en mayúsculas sin cifras
+      // (descarta eslóganes, direcciones y teléfonos como "Juntos es cooperativa" o "157 - V. Cardenal…").
+      if (inHeader && !leadQty && (/\d/.test(name) || name !== name.toUpperCase())) {
+        pending = null;
+        continue;
+      }
       // Nombre sin precio: producto a peso/multiplicador, o primera mitad de un nombre largo.
       if (pending && pending.age <= 1 && name.length < 28) pending = { name: `${pending.name} ${name}`, qty: pending.qty ?? qtyHint, age: 0 };
       else pending = { name, qty: qtyHint, age: 0 };
@@ -241,6 +277,16 @@ export function parseReceipt(text: string): ParsedReceipt {
     });
     pending = null;
     pendingMult = null;
+  }
+
+  // Última defensa: si la suma no cuadra con el total impreso y quitar una única línea dudosa
+  // (de las primeras, o de baja confianza) lo cuadra exactamente, esa línea no era un producto.
+  if (total !== null && items.length > 1) {
+    const s = items.reduce((acc, l) => acc + l.total, 0);
+    if (Math.abs(total - s) > 0.05) {
+      const bad = items.findIndex((l, idx) => (idx < 2 || l.confidence < 0.7) && near(s - l.total, total!, 0.02));
+      if (bad >= 0) items.splice(bad, 1);
+    }
   }
 
   const sum = round2(items.reduce((acc, l) => acc + l.total, 0));
