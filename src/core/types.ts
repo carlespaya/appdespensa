@@ -17,8 +17,14 @@ export interface Store {
   name: string;
   /** Color de marca para chips y gráficos. */
   color: string;
-  /** Distancia al usuario en km (si hay ubicación). */
+  /** Distancia al usuario en km (manual o calculada con la ubicación). */
   distanceKm?: number;
+  /** Supermercado favorito del usuario: se destaca y puede limitar la cesta solo a favoritos. */
+  preferred?: boolean;
+  /** false = el usuario no quiere que se le sugiera (no lo tiene cerca, no le gusta…). */
+  enabled?: boolean;
+  /** Límite de gasto mensual en esta tienda (€). */
+  monthlyLimit?: number;
 }
 
 export interface ReceiptLine {
@@ -51,6 +57,9 @@ export interface Receipt {
 export interface ParsedReceipt {
   storeId: string | null;
   storeName: string | null;
+  storeColor: string | null;
+  /** false si la tienda no es una cadena conocida y su nombre se ha deducido de la cabecera. */
+  storeKnown: boolean;
   date: string | null;
   lines: Omit<ReceiptLine, 'id' | 'productId' | 'category'>[];
   total: number | null;

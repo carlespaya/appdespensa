@@ -34,6 +34,12 @@
         }
       ],
       [
+        "expo-image-picker",
+        {
+          "photosPermission": "Despensa usa tus fotos para leer tickets que ya hayas fotografiado."
+        }
+      ],
+      [
         "expo-location",
         {
           "locationWhenInUsePermission": "Despensa usa tu ubicación para calcular qué supermercados te quedan más cerca."

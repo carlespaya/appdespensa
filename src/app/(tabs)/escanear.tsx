@@ -1,6 +1,7 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
+import * as ImagePicker from 'expo-image-picker';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -10,7 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GlassButton, GlassCard } from '@/components/Glass';
 import { Backdrop } from '@/components/Screen';
 import { parseReceipt } from '@/core/receiptParser';
-import { isDemoOcr, ocr } from '@/services/ocr';
+import { demoOcr, ocr } from '@/services/ocr';
 import { useAppStore } from '@/store/useAppStore';
 import { colors, radius, space, type } from '@/theme/tokens';
 
@@ -37,6 +38,7 @@ export default function Scan() {
   const [error, setError] = useState('');
   const camera = useRef<CameraView>(null);
   const setDraft = useAppStore((s) => s.setDraftFromParsed);
+  const ocrApiKey = useAppStore((s) => s.settings.ocrApiKey);
 
   // Al volver a la pestaña se reinicia el estado (la cámara se monta solo con foco).
   const [focused, setFocused] = useState(false);
@@ -48,12 +50,20 @@ export default function Scan() {
     }, []),
   );
 
-  const process = async (image: { uri: string; base64?: string }) => {
+  const process = async (image: { uri: string }, demo = false) => {
     setPhase('processing');
     try {
-      const text = await ocr.recognize(image);
-      const parsed = parseReceipt(text);
-      if (parsed.lines.length === 0) throw new Error('No hemos encontrado productos. Prueba con más luz y el ticket estirado.');
+      let parsed;
+      if (demo) parsed = parseReceipt(await demoOcr.recognize(image));
+      else {
+        parsed = parseReceipt(await ocr.recognize(image, { apiKey: ocrApiKey, engine: 2 }));
+        // Si la lectura rápida sale pobre, se reintenta con el motor de mayor precisión.
+        if (parsed.lines.length < 2 || parsed.totalMismatch) {
+          const retry = await ocr.recognize(image, { apiKey: ocrApiKey, engine: 3 }).then(parseReceipt).catch(() => null);
+          if (retry && (retry.lines.length > parsed.lines.length || (!retry.totalMismatch && parsed.totalMismatch))) parsed = retry;
+        }
+      }
+      if (parsed.lines.length === 0) throw new Error('No hemos encontrado productos. Prueba con más luz, el ticket estirado y sin sombras.');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       setDraft(parsed, image.uri);
       router.push('/ticket/revisar');
@@ -65,8 +75,13 @@ export default function Scan() {
 
   const capture = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
-    const photo = await camera.current?.takePictureAsync({ quality: 0.7, base64: !isDemoOcr });
+    const photo = await camera.current?.takePictureAsync({ quality: 0.85 });
     if (photo) process(photo);
+  };
+
+  const pickFromGallery = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 });
+    if (!result.canceled && result.assets[0]) process({ uri: result.assets[0].uri });
   };
 
   const canUseCamera = Platform.OS !== 'web' && permission?.granted;
@@ -130,9 +145,16 @@ export default function Scan() {
             ) : Platform.OS !== 'web' && !permission?.granted ? (
               <GlassButton label="Permitir cámara" onPress={requestPermission} />
             ) : null}
-            {(isDemoOcr || !canUseCamera) && (
-              <GlassButton variant="ghost" label="Usar ticket de ejemplo" onPress={() => process({ uri: '' })} />
-            )}
+            <View style={styles.row}>
+              <GlassButton
+                variant="ghost"
+                label="Galería"
+                icon={<Ionicons name="images-outline" size={18} color={colors.text} />}
+                onPress={pickFromGallery}
+                style={{ flex: 1 }}
+              />
+              <GlassButton variant="ghost" label="Ejemplo" onPress={() => process({ uri: '' }, true)} style={{ flex: 1 }} />
+            </View>
           </View>
         )}
       </View>
@@ -166,6 +188,7 @@ const styles = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: space.xl },
   status: { flexDirection: 'row', alignItems: 'center', gap: space.md },
   actions: { alignItems: 'center', gap: space.md },
+  row: { flexDirection: 'row', gap: space.md, alignSelf: 'stretch' },
   shutter: { width: 76, height: 76, borderRadius: 38, borderWidth: 4, borderColor: colors.text, alignItems: 'center', justifyContent: 'center' },
   shutterInner: { width: 60, height: 60, borderRadius: 30, backgroundColor: colors.mint },
 });

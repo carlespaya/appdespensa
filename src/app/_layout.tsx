@@ -11,6 +11,7 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="ticket/revisar" options={{ presentation: 'modal', gestureEnabled: false }} />
         <Stack.Screen name="ticket/[id]" options={{ animation: 'slide_from_right' }} />
+        <Stack.Screen name="ajustes" options={{ animation: 'slide_from_bottom' }} />
       </Stack>
     </>
   );

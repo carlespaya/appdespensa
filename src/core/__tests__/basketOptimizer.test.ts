@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { optimizeBasket } from '../basketOptimizer';
-import { matchProduct, normalizeName } from '../normalize';
+import { displayName, matchProduct, normalizeName } from '../normalize';
 import type { PricePoint, Product, Store } from '../types';
 
 const stores: Store[] = [
@@ -64,13 +64,39 @@ describe('normalización y emparejamiento', () => {
     { id: 'yogur-natural', name: 'Yogur natural', category: 'lacteos', aliases: [] },
   ];
 
-  it('expande abreviaturas y quita marcas blancas', () => {
+  it('expande abreviaturas, quita marcas blancas y tamaños', () => {
     expect(normalizeName('LECH. ENT. HACENDADO')).toBe('leche entera');
+    expect(normalizeName('ACEITE OLIVA V.EXTRA 1L')).toBe('aceite oliva v extra');
+    expect(normalizeName('AGUA MINERAL 6X1,5L')).toBe('agua mineral');
   });
 
   it('empareja nombres de ticket con el catálogo tolerando erratas', () => {
     expect(matchProduct('LECHE ENTERA HACEND', catalog)?.product.id).toBe('leche-entera');
     expect(matchProduct('YOG NATRAL', catalog)?.product.id).toBe('yogur-natural');
+    expect(matchProduct('Leche entera 1L', catalog)?.product.id).toBe('leche-entera');
     expect(matchProduct('DETERGENTE', catalog)).toBeNull();
+  });
+
+  it('empareja el mismo producto con nombres de distintas cadenas', () => {
+    const full: Product[] = [
+      ...catalog,
+      { id: 'aceite', name: 'Aceite de oliva virgen extra 1L', category: 'despensa', aliases: [] },
+      { id: 'pan', name: 'Pan de molde integral', category: 'panaderia', aliases: [] },
+      { id: 'tomate-trit', name: 'Tomate triturado 400g', category: 'despensa', aliases: [] },
+    ];
+    expect(matchProduct('ACEITE OLIVA V.EXTRA', full)?.product.id).toBe('aceite');
+    expect(matchProduct('AC. OLIVA VIRG. EXTRA 1L', full)?.product.id).toBe('aceite');
+    expect(matchProduct('PAN MOLDE INTEG.', full)?.product.id).toBe('pan');
+    expect(matchProduct('Tomate triturado', full)?.product.id).toBe('tomate-trit');
+  });
+
+  it('genera un nombre legible para productos nuevos', () => {
+    expect(displayName('LECHE SEMI HACEND 1L')).toBe('Leche semidesnatada 1L');
+    expect(displayName('GALLETAS MARIA 800G')).toBe('Galletas maria 800g');
+  });
+
+  it('no confunde variantes excluyentes', () => {
+    expect(matchProduct('LECHE SEMI CARREFOUR 1L', catalog)).toBeNull();
+    expect(matchProduct('YOGUR GRIEGO', catalog)).toBeNull();
   });
 });

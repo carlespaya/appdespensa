@@ -4,13 +4,13 @@ import type { Category } from './types';
 const RULES: [Category, string[]][] = [
   ['lacteos', ['leche', 'yogur', 'queso', 'mantequilla', 'nata', 'kefir']],
   ['carne_pescado', ['pollo', 'pechuga', 'ternera', 'cerdo', 'lomo', 'jamon', 'salmon', 'merluza', 'atun', 'gamba']],
+  ['higiene', ['champu', 'gel', 'pasta dientes', 'desodorante', 'papel higienico', 'compresa']],
+  ['limpieza', ['detergente', 'lejia', 'suavizante', 'friegasuelos', 'lavavajillas', 'bayeta']],
+  ['congelados', ['congelad', 'helado', 'pizza']],
+  ['despensa', ['arroz', 'pasta', 'macarron', 'aceite', 'azucar', 'harina', 'legumbre', 'garbanzo', 'lenteja', 'triturado', 'galleta', 'cereal']],
   ['frescos', ['platano', 'manzana', 'tomate', 'lechuga', 'patata', 'cebolla', 'zanahoria', 'naranja', 'huevo', 'aguacate']],
   ['panaderia', ['pan', 'baguette', 'barra', 'croissant', 'molde']],
   ['bebidas', ['agua', 'cerveza', 'vino', 'refresco', 'cola', 'zumo', 'cafe']],
-  ['limpieza', ['detergente', 'lejia', 'suavizante', 'friegasuelos', 'lavavajillas', 'bayeta']],
-  ['higiene', ['champu', 'gel', 'pasta dientes', 'desodorante', 'papel higienico', 'compresa']],
-  ['congelados', ['congelad', 'helado', 'pizza']],
-  ['despensa', ['arroz', 'pasta', 'macarron', 'aceite', 'azucar', 'harina', 'legumbre', 'garbanzo', 'lenteja', 'triturado', 'galleta', 'cereal']],
 ];
 
 /** Clasificación por palabras clave. El usuario puede corregirla y la corrección se memoriza por producto. */

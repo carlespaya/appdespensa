@@ -7,7 +7,7 @@ import { Chip, GlassCard, SectionHeader } from '@/components/Glass';
 import { Screen } from '@/components/Screen';
 import { optimizeBasket } from '@/core/basketOptimizer';
 import { normalizeName } from '@/core/normalize';
-import { productById, storeById, useAppStore } from '@/store/useAppStore';
+import { activeStores, productById, storeById, useAppStore } from '@/store/useAppStore';
 import { colors, euro, radius, space, type } from '@/theme/tokens';
 
 function Stepper({ value, onChange }: { value: number; onChange: (n: number) => void }) {
@@ -30,7 +30,7 @@ export default function Basket() {
 
   const result = useMemo(
     () =>
-      optimizeBasket(shoppingList, stores, prices, {
+      optimizeBasket(shoppingList, activeStores(stores, settings), prices, {
         maxStores: settings.maxStores,
         extraStorePenalty: settings.extraStorePenalty,
         costPerKm: settings.useLocation ? undefined : 0,

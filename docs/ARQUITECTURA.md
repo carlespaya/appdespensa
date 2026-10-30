@@ -13,7 +13,8 @@
 | Estado | **Zustand** + `persist` | Mínimo boilerplate; los selectores evitan renders innecesarios. |
 | Persistencia local | **expo-sqlite** (`kv-store` en el MVP, tablas relacionales en la fase 2) | Funciona offline y sobrevive a reinicios. |
 | Backend | **Supabase** (Postgres + PostGIS + Auth + Storage + Edge Functions) | SQL real para agregar precios por zona, RLS para la privacidad y un nivel gratuito generoso. |
-| OCR | **Google Cloud Vision `DOCUMENT_TEXT_DETECTION`** desde una Edge Function, con el parser propio en el dispositivo | Es la mejor precisión en tickets térmicos. La clave nunca llega al cliente. |
+| OCR | **OCR.space** (`isTable`, motores 2 y 3) llamado desde la app, con el parser propio en el dispositivo | Gratuito (25.000 tickets/mes), sin código nativo, así que funciona en Expo Go. `isTable` mantiene nombre y precio en la misma fila. La Edge Function con Google Vision queda como alternativa para producción. |
+| Ubicación | `expo-location` + **OpenStreetMap (Overpass)** | Distancia real al local más cercano de cada cadena, gratis y sin clave. |
 | UI | `expo-blur`, `expo-linear-gradient`, `react-native-svg`, `react-native-reanimated` | Cristal, degradados, gráficos ligeros y animaciones a 60 fps en el hilo de UI. |
 | Tests | **Vitest** para el núcleo de dominio (sin RN) | Todo lo que importa (parser, optimizador, estadísticas) es TypeScript puro y se prueba en milisegundos. |
 
@@ -49,9 +50,9 @@
 ### Flujo de escaneo
 
 1. **Captura** (`escanear.tsx`): `CameraView` con un marco guía y una línea de escaneo animada (Reanimated).
-2. **OCR** (`services/ocr.ts`): se envía la imagen en base64 a `ocr-receipt`, que devuelve texto plano. Sin backend configurado se usa `DemoOcrProvider`.
-3. **Parseo** (`core/receiptParser.ts`): detecta la cadena, la fecha, las líneas (cantidad, nombre, precio unitario e importe), los productos a peso (`1,234 kg x 1,89 €/kg`), los multiplicadores (`3 x 0,65`) y el total. Calcula una **confianza por línea** y marca **descuadre** si la suma de las líneas no coincide con el total.
-4. **Emparejamiento** (`core/normalize.ts`): expande las abreviaturas (`LECH ENT` → `leche entera`), quita las marcas blancas y busca el producto canónico con el coeficiente de Dice sobre bigramas (tolera erratas del OCR).
+2. **OCR** (`services/ocr.ts`): la foto (de la cámara o de la galería) se reduce con `expo-image-manipulator` hasta caber en 1 MB y se envía a OCR.space con `isTable`. Si la lectura sale pobre (menos de 2 líneas o descuadre con el total), se reintenta con el motor 3, más preciso. El usuario puede poner su propia clave gratuita en Ajustes; sin ella se usa la pública de demostración.
+3. **Parseo** (`core/receiptParser.ts`): corrige errores típicos del OCR en importes (`O,95`, `1 ,35`), detecta la cadena (26 cadenas españolas en `core/stores.ts`; si es desconocida, deduce el nombre comercial de la cabecera y la tienda se **crea automáticamente** al guardar), la fecha, las líneas (cantidad al inicio o en columna, o deducida de unitario × n), los productos a peso, los multiplicadores antes o después del producto, los descuentos (restan al producto anterior), los códigos EAN, los nombres partidos en dos líneas y el total. Todo lo posterior al TOTAL (IVA, pago, puntos) se ignora. Calcula una **confianza por línea** y marca **descuadre** si la suma de las líneas no coincide con el total.
+4. **Emparejamiento** (`core/normalize.ts`): expande las abreviaturas (`AC. OLIVA VIRG.` → `aceite oliva virgen`), quita marcas blancas y tamaños, y compara palabra a palabra (F1 difuso con prefijos y Dice) penalizando las variantes excluyentes (entera ≠ semidesnatada). Si no hay coincidencia, la línea se guarda como **producto nuevo**, con el que podrán emparejarse los tickets de otras cadenas.
 5. **Revisión** (`ticket/revisar.tsx`): todo es editable en línea. Las líneas dudosas aparecen con borde ámbar. Al asignar un producto a mano se **aprende el alias** para los siguientes tickets.
 6. **Guardado**: el ticket pasa al historial y sus líneas se convierten en **observaciones de precio**, que alimentan la base comunitaria.
 
@@ -132,6 +133,7 @@ supabase/
 | Fase | Duración | Entregables |
 |---|---|---|
 | **0. Base** ✅ | Hecha | Proyecto Expo, sistema de diseño, navegación, núcleo de dominio con tests, todas las pantallas con datos de demo, esquema de Supabase y función OCR. |
+| **0.5 OCR real y ajustes** ✅ | Hecha | OCR.space gratuito, parser robusto multicadena, creación automática de tiendas y productos, Ajustes (nombre, límites, favoritos, distancias con OpenStreetMap). |
 | **1. MVP real** | 2–3 semanas | Supabase Auth (Apple, Google y enlace por email); Edge Function desplegada; subida de la foto a Storage; sincronización bidireccional de tickets (cola offline con `syncedAt`); development build con EAS. |
 | **2. Datos locales serios** | 1–2 semanas | Migrar de `kv-store` a tablas SQLite relacionales (tickets, líneas, precios) con índices; paginación del historial; búsqueda por texto. |
 | **3. Comunidad y ubicación** | 2–3 semanas | `expo-location` + `prices_near`; catálogo y alias compartidos (votación de alias); refresco de `community_prices` con pg_cron; moderación de valores atípicos (descartar precios a más de 3 MAD de la mediana). |
@@ -156,4 +158,4 @@ npm test             # tests del núcleo
 npm run typecheck
 ```
 
-Sin variables de entorno, la app usa el **OCR de demo** ("Usar ticket de ejemplo"). Para el OCR real, copia `.env.example` a `.env` y despliega `supabase/functions/ocr-receipt`. La cámara necesita un dispositivo físico; en web aparece el botón de ejemplo.
+El escaneo usa OCR.space directamente: funciona en Expo Go sin configurar nada. Para no depender de la clave pública de demostración, consigue una gratuita en https://ocr.space/ocrapi/freekey y pégala en **Ajustes → Lectura de tickets**. El botón «Ejemplo» usa tickets de prueba sin conexión.

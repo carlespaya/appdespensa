@@ -9,8 +9,8 @@ import { GlassCard, SectionHeader } from '@/components/Glass';
 import { ReceiptRow } from '@/components/ReceiptRow';
 import { Screen } from '@/components/Screen';
 import { optimizeBasket } from '@/core/basketOptimizer';
-import { monthlySpending } from '@/core/stats';
-import { useAppStore } from '@/store/useAppStore';
+import { monthlySpending, spendingByStore } from '@/core/stats';
+import { activeStores, useAppStore } from '@/store/useAppStore';
 import { colors, euro, space, type } from '@/theme/tokens';
 
 export default function Home() {
@@ -21,12 +21,39 @@ export default function Home() {
   const delta = previous ? ((current - previous) / previous) * 100 : 0;
 
   const plan = useMemo(
-    () => optimizeBasket(shoppingList, stores, prices, { maxStores: settings.maxStores, costPerKm: settings.useLocation ? undefined : 0 }),
+    () =>
+      optimizeBasket(shoppingList, activeStores(stores, settings), prices, {
+        maxStores: settings.maxStores,
+        extraStorePenalty: settings.extraStorePenalty,
+        costPerKm: settings.useLocation ? undefined : 0,
+      }),
     [shoppingList, stores, prices, settings],
   );
 
+  // Gasto de este mes por súper, para avisar de los límites que el usuario haya fijado.
+  const thisMonth = months[months.length - 1].month;
+  const storeAlerts = useMemo(() => {
+    const spent = spendingByStore(receipts.filter((r) => r.date.startsWith(thisMonth)));
+    return stores
+      .filter((s) => s.monthlyLimit)
+      .map((s) => ({ store: s, spent: spent.find((x) => x.storeId === s.id)?.total ?? 0, limit: s.monthlyLimit! }))
+      .filter((a) => a.spent >= a.limit * 0.8);
+  }, [receipts, stores, thisMonth]);
+
+  const limit = settings.monthlyLimit;
+  const ratio = limit ? current / limit : 0;
+  const limitColor = ratio >= 1 ? colors.danger : ratio >= 0.8 ? colors.warning : colors.mint;
+
   return (
-    <Screen subtitle="Tu despensa" title="Hola 👋">
+    <Screen
+      subtitle="Tu despensa"
+      title={settings.userName ? `Hola, ${settings.userName}` : 'Hola 👋'}
+      right={
+        <Pressable onPress={() => router.push('/ajustes')} hitSlop={10} style={styles.gear} accessibilityLabel="Ajustes">
+          <Ionicons name="settings-outline" size={20} color={colors.text} />
+        </Pressable>
+      }
+    >
       <Animated.View entering={FadeInDown.duration(500)}>
         <GlassCard strong>
           <Text style={type.overline}>Gasto este mes</Text>
@@ -38,9 +65,32 @@ export default function Home() {
             </View>
           </View>
           <Text style={[type.caption, { marginBottom: space.lg }]}>vs. {euro(previous)} el mes pasado</Text>
+          {limit && (
+            <View style={{ marginBottom: space.lg }}>
+              <View style={styles.track}>
+                <View style={[styles.fill, { width: `${Math.min(100, ratio * 100)}%`, backgroundColor: limitColor }]} />
+              </View>
+              <Text style={[type.caption, { marginTop: 6, color: ratio >= 0.8 ? limitColor : colors.textMuted }]}>
+                {ratio >= 1
+                  ? `Has superado tu límite de ${euro(limit)} en ${euro(current - limit)}`
+                  : `${Math.round(ratio * 100)} % de tu límite de ${euro(limit)} · quedan ${euro(limit - current)}`}
+              </Text>
+            </View>
+          )}
           <MonthlyBars data={months} />
         </GlassCard>
       </Animated.View>
+
+      {storeAlerts.map((a) => (
+        <GlassCard key={a.store.id} style={{ marginTop: space.md }}>
+          <View style={styles.row}>
+            <Ionicons name="alert-circle" size={20} color={a.spent >= a.limit ? colors.danger : colors.warning} />
+            <Text style={[type.caption, { flex: 1, color: colors.text }]}>
+              {a.store.name}: llevas {euro(a.spent)} de tu límite de {euro(a.limit)} este mes
+            </Text>
+          </View>
+        </GlassCard>
+      ))}
 
       {plan && (
         <Animated.View entering={FadeInDown.delay(120).duration(500)}>
@@ -79,6 +129,9 @@ export default function Home() {
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: space.md, marginTop: 4 },
+  gear: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.glassFillStrong, alignItems: 'center', justifyContent: 'center' },
+  track: { height: 8, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.08)', overflow: 'hidden' },
+  fill: { height: '100%', borderRadius: 999 },
   badge: { flexDirection: 'row', alignItems: 'center', gap: 2, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 999 },
   iconWrap: {
     width: 40,

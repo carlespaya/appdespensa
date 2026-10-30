@@ -8,23 +8,27 @@ import { Screen } from '@/components/Screen';
 import { buildPriceIndex } from '@/core/basketOptimizer';
 import { normalizeName } from '@/core/normalize';
 import { priceHistory } from '@/core/stats';
-import { storeById, useAppStore } from '@/store/useAppStore';
+import { activeStores, storeById, useAppStore } from '@/store/useAppStore';
 import { colors, euro, radius, space, type } from '@/theme/tokens';
 
 export default function Compare() {
-  const { products, prices, stores, receipts } = useAppStore();
+  const { products, prices, stores: allStores, receipts, settings } = useAppStore();
+  const stores = useMemo(() => activeStores(allStores, settings), [allStores, settings]);
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState(products[0]?.id);
   const index = useMemo(() => buildPriceIndex(prices), [prices]);
   const [since] = useState(() => new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10));
 
-  // Cesta habitual: productos comprados en los últimos 90 días que todos los súper tienen.
+  // Cesta habitual: productos comprados en los últimos 90 días. Solo entran en la comparativa los súper
+  // con precio para al menos el 60 % de ellos (una tienda recién creada con 3 precios no la vacía).
   const habitual = useMemo(() => {
     const qty = new Map<string, number>();
     for (const r of receipts.filter((r) => r.date >= since))
       for (const l of r.lines) if (l.productId) qty.set(l.productId, (qty.get(l.productId) ?? 0) + l.quantity);
-    const common = [...qty.keys()].filter((id) => stores.every((s) => index.get(id)?.has(s.id)));
-    return stores
+    const ids = [...qty.keys()];
+    const comparable = stores.filter((s) => ids.filter((id) => index.get(id)?.has(s.id)).length >= ids.length * 0.6);
+    const common = ids.filter((id) => comparable.every((s) => index.get(id)?.has(s.id)));
+    return comparable
       .map((s) => ({ store: s, cost: common.reduce((a, id) => a + index.get(id)!.get(s.id)! * qty.get(id)!, 0) }))
       .sort((a, b) => a.cost - b.cost)
       .map((x) => ({ ...x, count: common.length }));

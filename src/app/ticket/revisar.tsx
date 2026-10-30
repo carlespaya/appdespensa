@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Chip, GlassButton, GlassCard, SectionHeader } from '@/components/Glass';
 import { Backdrop } from '@/components/Screen';
-import { normalizeName, similarity } from '@/core/normalize';
+import { displayName, rankProducts } from '@/core/normalize';
 import type { ReceiptLine } from '@/core/types';
 import { useAppStore } from '@/store/useAppStore';
 import { colors, euro, radius, space, type } from '@/theme/tokens';
@@ -21,8 +21,9 @@ const parseNum = (s: string) => {
 /** Revisión rápida tras el OCR: todo editable en línea, lo dudoso resaltado en ámbar. */
 export default function ReviewReceipt() {
   const insets = useSafeAreaInsets();
-  const { draft, updateDraft, commitDraft, stores, products, learnAlias } = useAppStore();
+  const { draft, updateDraft, commitDraft, stores, products, learnAlias, addStore } = useAppStore();
   const [openLine, setOpenLine] = useState<string | null>(null);
+  const [newStoreName, setNewStoreName] = useState<string | null>(null);
 
   if (!draft) {
     return (
@@ -36,7 +37,8 @@ export default function ReviewReceipt() {
 
   const sum = round2(draft.lines.reduce((a, l) => a + l.total, 0));
   const mismatch = Math.abs(sum - draft.total) > 0.05;
-  const doubtful = draft.lines.filter((l) => l.confidence < 0.7 || !l.productId).length;
+  const doubtful = draft.lines.filter((l) => l.confidence < 0.7).length;
+  const storeChips = draft.newStore ? [draft.newStore, ...stores] : stores;
 
   const setLine = (id: string, patch: Partial<ReceiptLine>) =>
     updateDraft({
@@ -50,11 +52,17 @@ export default function ReviewReceipt() {
     });
 
   const suggestions = (raw: string) =>
-    products
-      .map((p) => ({ p, s: Math.max(similarity(normalizeName(raw), normalizeName(p.name)), ...p.aliases.map((a) => similarity(normalizeName(raw), a))) }))
-      .sort((a, b) => b.s - a.s)
+    rankProducts(raw, products)
       .slice(0, 4)
-      .map((x) => x.p);
+      .map((x) => x.product);
+
+  const createStore = () => {
+    if (newStoreName?.trim()) {
+      const store = addStore(newStoreName);
+      updateDraft({ ...draft, storeId: store.id });
+    }
+    setNewStoreName(null);
+  };
 
   const save = () => {
     const id = commitDraft();
@@ -85,11 +93,44 @@ export default function ReviewReceipt() {
         )}
 
         <SectionHeader title="Supermercado" />
+        {draft.newStore && draft.storeId === draft.newStore.id && (
+          <Text style={[type.caption, { color: colors.mint, marginBottom: space.sm }]}>
+            Nuevo supermercado detectado: se añadirá «{draft.newStore.name}» al guardar.
+          </Text>
+        )}
+        {!draft.storeId && (
+          <Text style={[type.caption, { color: colors.warning, marginBottom: space.sm }]}>No hemos reconocido la tienda. Elígela o créala.</Text>
+        )}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: space.sm }}>
-          {stores.map((s) => (
-            <Chip key={s.id} label={s.name} color={s.color} active={draft.storeId === s.id} onPress={() => updateDraft({ ...draft, storeId: s.id })} />
+          {storeChips.map((s) => (
+            <Chip
+              key={s.id}
+              label={s === draft.newStore ? `${s.name} · nueva` : s.name}
+              color={s.color}
+              active={draft.storeId === s.id}
+              onPress={() => updateDraft({ ...draft, storeId: s.id })}
+            />
           ))}
+          <Chip label="+ Otra" onPress={() => setNewStoreName('')} />
         </ScrollView>
+        {newStoreName !== null && (
+          <GlassCard padded={false} style={{ marginTop: space.sm }}>
+            <View style={[styles.inline, { paddingRight: space.lg }]}>
+              <TextInput
+                autoFocus
+                value={newStoreName}
+                onChangeText={setNewStoreName}
+                onSubmitEditing={createStore}
+                placeholder="Nombre del supermercado"
+                placeholderTextColor={colors.textFaint}
+                style={[type.body, styles.input, { flex: 1 }]}
+              />
+              <Pressable onPress={createStore} hitSlop={8}>
+                <Ionicons name="checkmark-circle" size={26} color={colors.mint} />
+              </Pressable>
+            </View>
+          </GlassCard>
+        )}
 
         <SectionHeader title="Fecha" />
         <GlassCard padded={false}>
@@ -110,7 +151,7 @@ export default function ReviewReceipt() {
         } />
         <GlassCard padded={false}>
           {draft.lines.map((l, i) => {
-            const warn = l.confidence < 0.7 || !l.productId;
+            const warn = l.confidence < 0.7;
             const open = openLine === l.id;
             const product = products.find((p) => p.id === l.productId);
             return (
@@ -118,8 +159,8 @@ export default function ReviewReceipt() {
                 <Pressable onPress={() => setOpenLine(open ? null : l.id)} style={styles.inline}>
                   <View style={{ flex: 1 }}>
                     <Text style={type.subtitle} numberOfLines={1}>{l.rawName || 'Nuevo producto'}</Text>
-                    <Text style={[type.caption, !product && { color: colors.warning }]}>
-                      {product ? product.name : 'Sin emparejar'} · {l.quantity} {l.unit} × {euro(l.unitPrice)}
+                    <Text style={[type.caption, !product && { color: colors.blue }]} numberOfLines={1}>
+                      {product ? product.name : `Nuevo: ${displayName(l.rawName)}`} · {l.quantity} {l.unit} × {euro(l.unitPrice)}
                     </Text>
                   </View>
                   <Text style={[type.subtitle, type.number]}>{euro(l.total)}</Text>
@@ -145,7 +186,7 @@ export default function ReviewReceipt() {
                         <Ionicons name="trash-outline" size={20} color={colors.danger} />
                       </Pressable>
                     </View>
-                    <Text style={type.overline}>¿Qué producto es?</Text>
+                    <Text style={type.overline}>¿Es alguno de estos? Si no, se guardará como producto nuevo</Text>
                     <View style={styles.wrap}>
                       {suggestions(l.rawName).map((p) => (
                         <Chip
