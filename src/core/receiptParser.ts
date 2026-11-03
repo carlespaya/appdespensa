@@ -46,11 +46,18 @@ export function stripDateTime(line: string): string {
 
 const COLUMN_WORDS = /\b(cant|cantidad|uds?|unid|art[ií]culos?|descripci[oó]n|producto|pvp|precio|p\.?\s?unit|importe|euros?|eur|€)\b/gi;
 
-/** Línea de títulos de columna: al menos dos palabras de columna y ningún importe. */
-function isColumnHeader(line: string): boolean {
-  if (/\d[.,]\d{2}/.test(line)) return false;
+/** Línea que empieza por un título de columna típico: "CANT", "ART.", "DESCRIPCIÓN", "UDS"… */
+const COLUMN_START = /^\s*(cant\b|cant\.|cantidad|ctd\.?|uds?\b|ud\.|unid|art[ií]c|art\.|descrip|producto|concepto|denominaci)/i;
+
+/**
+ * Títulos de columna, sin importes. "strong" = dos o más palabras de columna (inequívoco);
+ * "weak" = solo empieza por una (p. ej. "CANT" suelto, o el OCR partió la línea).
+ */
+function columnHeaderKind(line: string): 'strong' | 'weak' | null {
+  if (/\d[.,]\d{2}/.test(line)) return null;
   const words = new Set((line.match(COLUMN_WORDS) ?? []).map((w) => w.toLowerCase()));
-  return words.size >= 2;
+  if (words.size >= 2) return 'strong';
+  return COLUMN_START.test(line) ? 'weak' : null;
 }
 
 function detectDate(text: string): string | null {
@@ -125,8 +132,21 @@ export function parseReceipt(text: string): ParsedReceipt {
   const date = detectDate(rawLines.map(fixOcrNumbers).join('\n'));
   const lines = rawLines.map((l) => stripDateTime(fixOcrNumbers(l)));
   // Si el ticket tiene cabecera de columnas ("CANT ARTICULO PVP EUROS"), los productos empiezan justo después.
+  // Una cabecera débil solo cuenta si va antes de la primera línea con pinta de producto, para que
+  // un "ARTICULOS 15" al final no pueda hacer descartar los productos.
   const totalIndex = lines.findIndex((l) => TOTAL.test(l));
-  const headerIndex = lines.findIndex((l, i) => isColumnHeader(l) && (totalIndex < 0 || i < totalIndex));
+  const firstPriced = lines.findIndex((l) => /\d[.,]\d{2}/.test(l) && hasName(l) && !META.test(l));
+  let headerIndex = lines.findIndex((l, i) => {
+    if (totalIndex >= 0 && i >= totalIndex) return false;
+    const kind = columnHeaderKind(l);
+    return kind === 'strong' || (kind === 'weak' && (firstPriced < 0 || i < firstPriced));
+  });
+  // El OCR puede partir los títulos en varias líneas ("CANT" / "ARTICULO" / "PVP EUROS").
+  while (headerIndex >= 0 && headerIndex + 1 < lines.length && columnHeaderKind(lines[headerIndex + 1])) headerIndex++;
+  /** Índices de líneas que han aportado algo (producto, peso, multiplicador o descuento). */
+  const used = new Set<number>();
+  const itemSource: number[] = [];
+  let current = -1;
 
   const items: ParsedLine[] = [];
   let total: number | null = null;
@@ -140,11 +160,14 @@ export function parseReceipt(text: string): ParsedReceipt {
   const push = (line: ParsedLine) => {
     if (line.total <= 0 || line.total > 999) return;
     items.push(line);
+    itemSource.push(current);
+    used.add(current);
   };
 
   for (const [i, line] of lines.entries()) {
     // Todo lo anterior a la cabecera de columnas es cabecera del ticket (logo, eslogan, dirección…).
     if (i <= headerIndex) continue;
+    current = i;
     /** Zona de cabecera sin marcador de columnas: aún no ha aparecido ningún producto. */
     const inHeader = headerIndex < 0 && items.length === 0;
     if (pending) pending.age++;
@@ -180,6 +203,7 @@ export function parseReceipt(text: string): ParsedReceipt {
       if (discount < prev.total) {
         prev.total = round2(prev.total - discount);
         prev.unitPrice = round2(prev.total / prev.quantity);
+        used.add(i);
       }
       continue;
     }
@@ -199,6 +223,7 @@ export function parseReceipt(text: string): ParsedReceipt {
       } else if (prev && (near(prev.total, lineTotal) || near(prev.total, kg * perKg))) {
         // El peso viene debajo de un producto que ya tenía importe (estilo Lidl).
         Object.assign(prev, { quantity: kg, unit: 'kg', unitPrice: perKg });
+        used.add(i);
       }
       continue;
     }
@@ -214,9 +239,11 @@ export function parseReceipt(text: string): ParsedReceipt {
         pending = null;
       } else if (prev && near(prev.total, qty * unitPrice)) {
         Object.assign(prev, { quantity: qty, unitPrice });
+        used.add(i);
       } else {
         // Estilo Carrefour: el multiplicador va antes del producto al que se refiere.
         pendingMult = { qty, unitPrice };
+        used.add(i);
       }
       continue;
     }
@@ -285,12 +312,26 @@ export function parseReceipt(text: string): ParsedReceipt {
     const s = items.reduce((acc, l) => acc + l.total, 0);
     if (Math.abs(total - s) > 0.05) {
       const bad = items.findIndex((l, idx) => (idx < 2 || l.confidence < 0.7) && near(s - l.total, total!, 0.02));
-      if (bad >= 0) items.splice(bad, 1);
+      if (bad >= 0) {
+        items.splice(bad, 1);
+        used.delete(itemSource.splice(bad, 1)[0]);
+      }
     }
+  }
+
+  // Líneas con importe dentro de la zona de productos que no se han convertido en nada:
+  // la revisión las ofrece para añadirlas con un toque si eran productos que se escaparon.
+  const zoneStart = headerIndex >= 0 ? headerIndex + 1 : Math.max(0, itemSource[0] ?? firstPriced);
+  const zoneEnd = totalIndex >= 0 ? totalIndex : lines.length;
+  const unusedLines: string[] = [];
+  for (let i = zoneStart; i < zoneEnd; i++) {
+    if (used.has(i) || META.test(lines[i]) || !/\d[.,]\d{2}/.test(lines[i]) || !hasName(lines[i])) continue;
+    unusedLines.push(rawLines[i].replace(/\t+/g, '  '));
   }
 
   const sum = round2(items.reduce((acc, l) => acc + l.total, 0));
   return {
+    unusedLines,
     storeId: store?.id ?? null,
     storeName: store?.name ?? null,
     storeColor: store?.color ?? null,

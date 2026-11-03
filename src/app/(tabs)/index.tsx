@@ -5,7 +5,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 
 import { MonthlyBars } from '@/components/Charts';
-import { GlassCard, SectionHeader } from '@/components/Glass';
+import { GlassButton, GlassCard, SectionHeader } from '@/components/Glass';
 import { ReceiptRow } from '@/components/ReceiptRow';
 import { Screen } from '@/components/Screen';
 import { optimizeBasket } from '@/core/basketOptimizer';
@@ -13,8 +13,14 @@ import { monthlySpending, spendingByStore } from '@/core/stats';
 import { activeStores, useAppStore } from '@/store/useAppStore';
 import { colors, euro, space, type } from '@/theme/tokens';
 
+const GUIDE: { icon: React.ComponentProps<typeof Ionicons>['name']; title: string; text: string }[] = [
+  { icon: 'scan', title: '1. Escanea tu ticket', text: 'Con el botón central. Leemos el súper, la fecha y cada producto.' },
+  { icon: 'create-outline', title: '2. Revisa en segundos', text: 'Quita lo que sobre, añade lo que falte y guarda.' },
+  { icon: 'git-compare-outline', title: '3. Compara y ahorra', text: 'Ve dónde es más barato cada producto y qué cesta te sale mejor.' },
+];
+
 export default function Home() {
-  const { receipts, shoppingList, stores, prices, settings } = useAppStore();
+  const { receipts, shoppingList, stores, prices, settings, updateSettings } = useAppStore();
   const months = useMemo(() => monthlySpending(receipts, 6), [receipts]);
   const current = months[months.length - 1].total;
   const previous = months[months.length - 2].total;
@@ -54,6 +60,29 @@ export default function Home() {
         </Pressable>
       }
     >
+      {!settings.onboardingDone && (
+        <Animated.View entering={FadeInDown.duration(400)} style={{ marginBottom: space.lg }}>
+          <GlassCard>
+            <Text style={[type.subtitle, { marginBottom: space.md }]}>Así funciona Despensa</Text>
+            {GUIDE.map((g, i) => (
+              <View key={g.title} style={[styles.row, { marginTop: i ? space.md : 0, alignItems: 'flex-start' }]}>
+                <View style={styles.iconWrap}>
+                  <Ionicons name={g.icon} size={18} color={colors.mint} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={type.body}>{g.title}</Text>
+                  <Text style={type.caption}>{g.text}</Text>
+                </View>
+              </View>
+            ))}
+            <View style={[styles.row, { marginTop: space.lg }]}>
+              <GlassButton label="Escanear" onPress={() => router.navigate('/escanear')} style={{ flex: 1 }} />
+              <GlassButton label="Entendido" variant="ghost" onPress={() => updateSettings({ onboardingDone: true })} />
+            </View>
+          </GlassCard>
+        </Animated.View>
+      )}
+
       <Animated.View entering={FadeInDown.duration(500)}>
         <GlassCard strong>
           <Text style={type.overline}>Gasto este mes</Text>

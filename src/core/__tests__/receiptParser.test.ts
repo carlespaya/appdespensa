@@ -96,6 +96,20 @@ describe('parseReceipt · ticket real de Consum (foto arrugada)', () => {
     });
   }
 
+  it('no deja líneas sin interpretar cuando todo cuadra', () => {
+    expect(parseReceipt(ENGINE2).unusedLines).toEqual([]);
+  });
+
+  it('empieza a leer en una cabecera parcial ("CANT" sola, o la línea partida por el OCR)', () => {
+    const partial = ENGINE3.replace('CANT ARTICULO PVP EUROS', 'CANT\nARTICULO');
+    const r = parseReceipt(partial);
+    expect(r.lines[0].rawName).toBe('PEPINO HOLANDES');
+    expect(r.lines).toHaveLength(15);
+    // Una cabecera rara que el OCR lee con erratas también vale si empieza por "ART."
+    const odd = parseReceipt('CONSUM\nJUNTOS ES COOPERATIVA\nART. DESCR.\n1 PEPINO 0,99\nTOTAL 0,99');
+    expect(odd.lines.map((l) => l.rawName)).toEqual(['PEPINO']);
+  });
+
   it('sin cabecera de columnas tampoco toma la dirección ni la fecha como producto', () => {
     const r = parseReceipt(ENGINE3.replace('CANT ARTICULO PVP EUROS\n', ''));
     expect(r.lines[0].rawName).toBe('PEPINO HOLANDES');
@@ -221,6 +235,24 @@ GRACIAS POR SU VISITA`);
     const r = parseReceipt('MERCADONA\n2 YOG|_R NAT 1,10 2,90\nTOTAL 9,99');
     expect(r.totalMismatch).toBe(true);
     expect(r.lines[0].confidence).toBeLessThan(0.7);
+  });
+});
+
+describe('líneas no interpretadas', () => {
+  it('ofrece para rescatar las líneas con importe que no se han convertido en producto', () => {
+    const r = parseReceipt(`MERCADONA
+DESCRIPCION IMPORTE
+1 LECHE ENTERA 0,95
+OFERTA ESPECIAL 5,00
+1 PAN 1,20
+TOTAL 2,15`);
+    expect(r.lines.map((l) => l.rawName)).toEqual(['LECHE ENTERA', 'PAN']);
+    expect(r.unusedLines).toEqual(['OFERTA ESPECIAL 5,00']);
+  });
+
+  it('un "ARTICULOS 3" después de los productos no hace descartar nada', () => {
+    const r = parseReceipt('ALDI\nLECHE 0,95\nPAN 1,20\nHUEVOS 2,10\nARTICULOS 3\nTOTAL 4,25');
+    expect(r.lines).toHaveLength(3);
   });
 });
 

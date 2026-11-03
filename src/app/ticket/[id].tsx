@@ -72,7 +72,12 @@ export default function ReceiptDetail() {
       <SectionHeader title={`Productos (${receipt.lines.length})`} />
       <GlassCard padded={false}>
         {receipt.lines.map((l, i) => (
-          <View key={l.id} style={[styles.line, i > 0 && styles.divider]}>
+          <Pressable
+            key={l.id}
+            disabled={!l.productId}
+            onPress={() => l.productId && router.push({ pathname: '/producto/[id]', params: { id: l.productId } })}
+            style={({ pressed }) => [styles.line, i > 0 && styles.divider, pressed && { opacity: 0.7 }]}
+          >
             <View style={{ flex: 1 }}>
               <Text style={type.body} numberOfLines={1}>{l.rawName}</Text>
               <Text style={type.caption}>
@@ -80,7 +85,8 @@ export default function ReceiptDetail() {
               </Text>
             </View>
             <Text style={[type.subtitle, type.number]}>{euro(l.total)}</Text>
-          </View>
+            {l.productId && <Ionicons name="chevron-forward" size={14} color={colors.textFaint} />}
+          </Pressable>
         ))}
       </GlassCard>
 

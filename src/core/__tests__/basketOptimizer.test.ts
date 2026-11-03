@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { optimizeBasket } from '../basketOptimizer';
+import { categorize } from '../categorize';
 import { displayName, matchProduct, normalizeName } from '../normalize';
 import type { PricePoint, Product, Store } from '../types';
 
@@ -88,6 +89,15 @@ describe('normalización y emparejamiento', () => {
     expect(matchProduct('AC. OLIVA VIRG. EXTRA 1L', full)?.product.id).toBe('aceite');
     expect(matchProduct('PAN MOLDE INTEG.', full)?.product.id).toBe('pan');
     expect(matchProduct('Tomate triturado', full)?.product.id).toBe('tomate-trit');
+  });
+
+  it('entiende las abreviaturas reales de Consum', () => {
+    expect(normalizeName('L.SEMI.S/L.CONSUM1L')).toBe('leche semidesnatada sin lactosa');
+    expect(normalizeName('CAFE DESC.CONSUM250')).toBe('cafe descafeinado');
+    expect(normalizeName('PAÑ.MENTOL CONSUM10')).toBe('panuelos mentol');
+    expect(categorize('PAÑ.MENTOL CONSUM10')).toBe('higiene');
+    expect(categorize('PAN BARRA')).toBe('panaderia');
+    expect(categorize('HIG.COMPAC.CONSUM12')).toBe('higiene');
   });
 
   it('genera un nombre legible para productos nuevos', () => {

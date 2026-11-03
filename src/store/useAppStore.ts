@@ -4,8 +4,9 @@ import { createJSONStorage, persist, type StateStorage } from 'zustand/middlewar
 
 import { categorize } from '@/core/categorize';
 import { displayName, matchProduct, normalizeName } from '@/core/normalize';
+import { mergeProducts, pairKey, rememberName, type CatalogData } from '@/core/products';
 import { colorFor, slugify } from '@/core/stores';
-import type { ParsedReceipt, PricePoint, Product, Receipt, ShoppingListItem, Store } from '@/core/types';
+import type { ParsedReceipt, PricePoint, Product, Receipt, ReceiptLine, ShoppingListItem, Store } from '@/core/types';
 import { catalog, demoReceipts, prices as seedPrices, stores as seedStores } from '@/data/seed';
 import type { NearbyChain } from '@/services/nearby';
 
@@ -18,9 +19,12 @@ function storage(): StateStorage {
 
 const uid = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 const today = () => new Date().toISOString().slice(0, 10);
+const round2 = (n: number) => Math.round(n * 100) / 100;
 
 export interface Settings {
   userName: string;
+  /** La guía rápida de Inicio ya se ha cerrado. */
+  onboardingDone: boolean;
   /** Límite de gasto mensual total (€). undefined = sin límite. */
   monthlyLimit?: number;
   maxStores: number;
@@ -34,6 +38,7 @@ export interface Settings {
 
 const DEFAULT_SETTINGS: Settings = {
   userName: '',
+  onboardingDone: false,
   maxStores: 2,
   useLocation: true,
   extraStorePenalty: 1.5,
@@ -42,9 +47,21 @@ const DEFAULT_SETTINGS: Settings = {
 };
 
 /** Ticket en revisión. `newStore` es la tienda detectada que aún no existe en la app. */
-export interface Draft extends Receipt {
+export interface Draft extends Omit<Receipt, 'lines'> {
   newStore?: Store;
+  lines: DraftLine[];
+  /** Líneas del ticket con importe que no se entendieron: se pueden añadir con un toque. */
+  unusedLines?: string[];
+  /** Texto tal cual lo devolvió el OCR, para consultarlo desde la revisión. */
+  ocrText?: string;
 }
+
+/** Línea en revisión: si no tiene producto, se creará uno nuevo con `newProductName` al guardar. */
+export type DraftLine = ReceiptLine & {
+  newProductName?: string;
+  /** El usuario eligió el producto a mano: ya no se reempareja al editar el nombre. */
+  manualMatch?: boolean;
+};
 
 interface AppState {
   stores: Store[];
@@ -54,14 +71,23 @@ interface AppState {
   shoppingList: ShoppingListItem[];
   settings: Settings;
   draft: Draft | null;
+  /** Parejas de productos que el usuario dijo que NO son el mismo (no se vuelven a sugerir). */
+  dismissedPairs: string[];
 
-  setDraftFromParsed: (parsed: ParsedReceipt, imageUri?: string) => void;
+  setDraftFromParsed: (parsed: ParsedReceipt, imageUri?: string, ocrText?: string) => void;
   updateDraft: (draft: Draft) => void;
   /** Guarda el ticket: crea la tienda y los productos nuevos y registra los precios observados. */
   commitDraft: () => string | null;
   deleteReceipt: (id: string) => void;
   /** Asigna manualmente una línea a un producto y aprende el alias para futuros tickets. */
   learnAlias: (rawName: string, productId: string) => void;
+  /** Une dos productos que son el mismo (con nombres distintos en cada súper). */
+  mergeProducts: (fromId: string, intoId: string) => void;
+  /** Deshace la última unión de productos (si la hay). */
+  undoMerge: () => void;
+  lastMergeSnapshot: CatalogData | null;
+  updateProduct: (id: string, patch: Partial<Pick<Product, 'name' | 'category'>>) => void;
+  dismissPair: (a: string, b: string) => void;
 
   addStore: (name: string) => Store;
   updateStore: (id: string, patch: Partial<Store>) => void;
@@ -99,8 +125,9 @@ export const useAppStore = create<AppState>()(
       ],
       settings: DEFAULT_SETTINGS,
       draft: null,
+      dismissedPairs: [],
 
-      setDraftFromParsed: (parsed, imageUri) => {
+      setDraftFromParsed: (parsed, imageUri, ocrText) => {
         const { products, stores } = get();
         // Una tienda ya creada antes (p. ej. "Consum") puede venir con otro id si se creó a mano.
         const existing = parsed.storeId
@@ -125,6 +152,8 @@ export const useAppStore = create<AppState>()(
             id: uid(),
             storeId: existing?.id ?? newStore?.id ?? '',
             newStore,
+            unusedLines: parsed.unusedLines,
+            ocrText,
             date: parsed.date ?? today(),
             lines,
             total: parsed.total ?? 0,
@@ -139,24 +168,31 @@ export const useAppStore = create<AppState>()(
       commitDraft: () => {
         const { draft, receipts, prices, stores, products } = get();
         if (!draft || !draft.storeId) return null;
-        const { newStore, ...receiptData } = draft;
+        const { newStore, unusedLines: _unused, ocrText: _ocr, ...receiptData } = draft;
         const nextStores = newStore && draft.storeId === newStore.id && !stores.some((s) => s.id === newStore.id) ? [...stores, newStore] : stores;
 
         // Las líneas sin emparejar se convierten en productos nuevos: así entran en el historial
         // de precios y otros tickets (de esta u otra cadena) podrán emparejarse con ellos.
+        // Además se recuerda cómo se llama cada producto en este súper (ficha de producto y emparejamiento).
         const nextProducts = [...products];
-        const lines = receiptData.lines.map((l) => {
-          if (l.productId || !normalizeName(l.rawName)) return l;
-          const name = displayName(l.rawName);
-          const id = slugify(name) || uid();
-          let product = nextProducts.find((p) => p.id === id);
-          if (!product) {
-            product = { id, name, category: l.category, aliases: [normalizeName(l.rawName)] };
-            nextProducts.push(product);
-          }
-          return { ...l, productId: product.id };
-        });
-        const receipt: Receipt = { ...receiptData, lines };
+        const upsert = (p: Product) => {
+          const idx = nextProducts.findIndex((x) => x.id === p.id);
+          if (idx >= 0) nextProducts[idx] = p;
+          else nextProducts.push(p);
+        };
+        const lines = receiptData.lines
+          .filter((l) => l.rawName.trim() && l.total > 0)
+          .map(({ newProductName, manualMatch: _manual, ...l }) => {
+            let product = l.productId ? nextProducts.find((p) => p.id === l.productId) : undefined;
+            if (!product) {
+              const name = newProductName?.trim() || displayName(l.rawName);
+              const id = slugify(name) || uid();
+              product = nextProducts.find((p) => p.id === id) ?? { id, name, category: l.category, aliases: [] };
+            }
+            upsert(rememberName(product, receiptData.storeId, l.rawName));
+            return { ...l, productId: product.id, category: product.category };
+          });
+        const receipt: Receipt = { ...receiptData, lines, total: receiptData.total || round2(lines.reduce((a, l) => a + l.total, 0)) };
 
         // Cada ticket confirmado aporta observaciones de precio (se suben a la comunidad al sincronizar).
         const observed: PricePoint[] = lines
@@ -182,6 +218,29 @@ export const useAppStore = create<AppState>()(
               : p,
           ),
         }),
+
+      mergeProducts: (fromId, intoId) => {
+        const { products, receipts, prices, shoppingList } = get();
+        const before = { products, receipts, prices, shoppingList };
+        set({ ...mergeProducts(before, fromId, intoId), lastMergeSnapshot: before });
+      },
+
+      undoMerge: () => {
+        const snapshot = get().lastMergeSnapshot;
+        if (snapshot) set({ ...snapshot, lastMergeSnapshot: null });
+      },
+      lastMergeSnapshot: null,
+
+      updateProduct: (id, patch) => {
+        const products = get().products.map((p) => (p.id === id ? { ...p, ...patch } : p));
+        // Cambiar la categoría de un producto la cambia también en su historial.
+        const receipts = patch.category
+          ? get().receipts.map((r) => ({ ...r, lines: r.lines.map((l) => (l.productId === id ? { ...l, category: patch.category! } : l)) }))
+          : get().receipts;
+        set({ products, receipts });
+      },
+
+      dismissPair: (a, b) => set({ dismissedPairs: [...get().dismissedPairs, pairKey(a, b)] }),
 
       addStore: (name) => {
         const clean = name.trim();
@@ -226,6 +285,7 @@ export const useAppStore = create<AppState>()(
         prices: s.prices,
         shoppingList: s.shoppingList,
         settings: s.settings,
+        dismissedPairs: s.dismissedPairs,
       }),
       // v1 no guardaba tiendas y tenía menos ajustes: se completan con los valores por defecto.
       migrate: (persisted) => {

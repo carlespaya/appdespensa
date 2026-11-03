@@ -1,4 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { router } from 'expo-router';
 import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
@@ -7,12 +8,14 @@ import { GlassCard, SectionHeader } from '@/components/Glass';
 import { Screen } from '@/components/Screen';
 import { buildPriceIndex } from '@/core/basketOptimizer';
 import { normalizeName } from '@/core/normalize';
+import { suggestDuplicates } from '@/core/products';
 import { priceHistory } from '@/core/stats';
 import { activeStores, storeById, useAppStore } from '@/store/useAppStore';
 import { colors, euro, radius, space, type } from '@/theme/tokens';
 
 export default function Compare() {
-  const { products, prices, stores: allStores, receipts, settings } = useAppStore();
+  const { products, prices, stores: allStores, receipts, settings, dismissedPairs } = useAppStore();
+  const pendingMerges = useMemo(() => suggestDuplicates(products, new Set(dismissedPairs)).length, [products, dismissedPairs]);
   const stores = useMemo(() => activeStores(allStores, settings), [allStores, settings]);
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState(products[0]?.id);
@@ -45,7 +48,32 @@ export default function Compare() {
   const maxHabitual = habitual[habitual.length - 1]?.cost ?? 1;
 
   return (
-    <Screen subtitle="Precios de la comunidad" title="Comparar">
+    <Screen
+      subtitle="Precios de la comunidad"
+      title="Comparar"
+      right={
+        <Pressable onPress={() => router.push('/productos')} style={styles.productsBtn} accessibilityLabel="Mis productos">
+          <Ionicons name="pricetags-outline" size={18} color={colors.text} />
+          {pendingMerges > 0 && <View style={styles.badge}><Text style={styles.badgeText}>{pendingMerges}</Text></View>}
+        </Pressable>
+      }
+    >
+      {pendingMerges > 0 && (
+        <Pressable onPress={() => router.push('/productos')} style={{ marginBottom: space.md }}>
+          <GlassCard>
+            <View style={styles.inline}>
+              <Ionicons name="git-merge-outline" size={22} color={colors.mint} />
+              <View style={{ flex: 1 }}>
+                <Text style={type.subtitle}>
+                  {pendingMerges === 1 ? '1 producto podría ser el mismo' : `${pendingMerges} productos podrían ser el mismo`}
+                </Text>
+                <Text style={type.caption}>Únelos para comparar sus precios entre supermercados</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={colors.textFaint} />
+            </View>
+          </GlassCard>
+        </Pressable>
+      )}
       {habitual.length > 0 && habitual[0].count > 0 && (
         <GlassCard strong>
           <Text style={type.overline}>Tu cesta habitual · {habitual[0].count} productos · 90 días</Text>
@@ -75,7 +103,7 @@ export default function Compare() {
 
       {product && (
         <>
-          <SectionHeader title={product.name} />
+          <SectionHeader title={product.name} action="Ver ficha" onAction={() => router.push({ pathname: '/producto/[id]', params: { id: product.id } })} />
           <GlassCard>
             {byStore.map(([storeId, price], i) => {
               const s = storeById(stores, storeId);
@@ -111,6 +139,10 @@ export default function Compare() {
 }
 
 const styles = StyleSheet.create({
+  inline: { flexDirection: 'row', alignItems: 'center', gap: space.md },
+  productsBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: colors.glassFillStrong, alignItems: 'center', justifyContent: 'center' },
+  badge: { position: 'absolute', top: -2, right: -2, minWidth: 18, height: 18, borderRadius: 9, backgroundColor: colors.mint, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
+  badgeText: { color: colors.onAccent, fontSize: 11, fontWeight: '800' },
   search: { flexDirection: 'row', alignItems: 'center', gap: space.sm, paddingHorizontal: space.lg, paddingVertical: 14 },
   results: { flexDirection: 'row', flexWrap: 'wrap', gap: space.sm, padding: space.md, paddingTop: 0 },
   result: { paddingHorizontal: space.md, paddingVertical: 8, borderRadius: radius.pill, backgroundColor: colors.glassFill },

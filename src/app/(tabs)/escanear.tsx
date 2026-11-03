@@ -53,19 +53,20 @@ export default function Scan() {
   const process = async (image: { uri: string }, demo = false) => {
     setPhase('processing');
     try {
-      let parsed;
-      if (demo) parsed = parseReceipt(await demoOcr.recognize(image));
-      else {
-        parsed = parseReceipt(await ocr.recognize(image, { apiKey: ocrApiKey, engine: 2 }));
-        // Si la lectura rápida sale pobre, se reintenta con el motor de mayor precisión.
-        if (parsed.lines.length < 2 || parsed.totalMismatch) {
-          const retry = await ocr.recognize(image, { apiKey: ocrApiKey, engine: 3 }).then(parseReceipt).catch(() => null);
-          if (retry && (retry.lines.length > parsed.lines.length || (!retry.totalMismatch && parsed.totalMismatch))) parsed = retry;
+      let text = demo ? await demoOcr.recognize(image) : await ocr.recognize(image, { apiKey: ocrApiKey, engine: 2 });
+      let parsed = parseReceipt(text);
+      // Si la lectura rápida sale pobre, se reintenta con el motor de mayor precisión.
+      if (!demo && (parsed.lines.length < 2 || parsed.totalMismatch)) {
+        const retryText = await ocr.recognize(image, { apiKey: ocrApiKey, engine: 3 }).catch(() => null);
+        const retry = retryText ? parseReceipt(retryText) : null;
+        if (retry && retryText && (retry.lines.length > parsed.lines.length || (!retry.totalMismatch && parsed.totalMismatch))) {
+          parsed = retry;
+          text = retryText;
         }
       }
       if (parsed.lines.length === 0) throw new Error('No hemos encontrado productos. Prueba con más luz, el ticket estirado y sin sombras.');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
-      setDraft(parsed, image.uri);
+      setDraft(parsed, image.uri, text);
       router.push('/ticket/revisar');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al leer el ticket');

@@ -54,6 +54,16 @@ const ABBREVIATIONS: Record<string, string> = {
   congel: 'congelado',
   fresc: 'fresco',
   salm: 'salmon',
+  desc: 'descafeinado',
+  descaf: 'descafeinado',
+  rec: 'recambio',
+  elec: 'electrico',
+  compac: 'compacto',
+  horch: 'horchata',
+  garbanzo: 'garbanzos',
+  verd: 'verduras',
+  cer: 'cereales',
+  cereal: 'cereales',
 };
 
 // Marcas blancas y ruido que no aportan para comparar entre supermercados.
@@ -61,6 +71,8 @@ const STOPWORDS = new Set([
   'hacendado', 'hacend', 'hacen', 'deliplus', 'bosque', 'verde', 'carrefour', 'dia', 'lidl', 'milbona', 'auchan',
   'alcampo', 'eroski', 'consum', 'aldi', 'milsani', 'bonpreu', 'condis', 'ifa', 'eliges', 'bm', 'classic', 'basic',
   'de', 'del', 'la', 'el', 'los', 'las', 'en', 'con', 'y', 'al', 'pack', 'x', 'p', 'u', 'ud', 'uds', 'unid', 'bot', 'botella', 'bric', 'brick', 'lata', 'bolsa', 'bandeja', 'band', 'tarrina', 'paq',
+  // Unidades sin número ("Plátano (kg)"): no dicen nada del producto.
+  'kg', 'g', 'gr', 'grs', 'l', 'lt', 'ml', 'cl', 'granel',
 ]);
 
 /** Variantes que hacen que dos productos NO sean equivalentes aunque el resto del nombre coincida. */
@@ -77,14 +89,24 @@ const SIZE = /\b\d+([.,]\d+)?\s*(x\s*\d+([.,]\d+)?\s*)?(kg|g|gr|grs|l|lt|ml|cl|u
 
 /** Pasa a minúsculas, quita tildes, símbolos, tamaños y marcas, y expande abreviaturas. */
 export function normalizeName(raw: string): string {
-  return raw
+  const tokens = raw
+    // Abreviaturas con barra o eñe que se perderían al quitar símbolos y tildes.
+    .replace(/\bs\/\s?(l|lact|lactosa)\b\.?/gi, ' sin lactosa ')
+    .replace(/\bs\/a\b/gi, ' sin alcohol ')
+    .replace(/\bs\/g\b/gi, ' sin gluten ')
+    .replace(/\bpa[ñÑ](?:uelos?)?(?![a-zñÑ])\.?/gi, ' panuelos ')
+    // Marca pegada al tamaño: "CONSUM250" → "CONSUM 250", "CONSUM1L" → "CONSUM 1L".
+    .replace(/([a-zñ])(\d)/gi, '$1 $2')
     .toLowerCase()
     .normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
     .replace(SIZE, ' ')
     .replace(/[^a-z0-9 ]+/g, ' ')
     .split(/\s+/)
-    .filter(Boolean)
+    .filter(Boolean);
+  // "L.SEMI", "L.ENT": una "l" suelta al principio es leche.
+  if (tokens[0] === 'l' && tokens.length > 1) tokens[0] = 'leche';
+  return tokens
     .map((t) => ABBREVIATIONS[t] ?? t)
     .filter((t) => !STOPWORDS.has(t) && !/^\d+$/.test(t))
     .join(' ');
@@ -150,7 +172,8 @@ export function rankProducts(rawName: string, catalog: Product[]): ProductMatch[
   return catalog
     .map((product) => ({
       product,
-      score: Math.max(nameSimilarity(n, normalizeName(product.name)), ...product.aliases.map((a) => (a === n ? 1 : nameSimilarity(n, a)))),
+      // Los alias se renormalizan por si se guardaron con una versión anterior de las reglas.
+      score: Math.max(nameSimilarity(n, normalizeName(product.name)), ...product.aliases.map((a) => normalizeName(a)).map((a) => (a === n ? 1 : nameSimilarity(n, a)))),
     }))
     .sort((a, b) => b.score - a.score);
 }

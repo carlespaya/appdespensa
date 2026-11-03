@@ -65,14 +65,18 @@ export interface ParsedReceipt {
   total: number | null;
   /** true si la suma de líneas no cuadra con el total impreso. */
   totalMismatch: boolean;
+  /** Líneas con importe en la zona de productos que no se han podido interpretar (para rescatarlas a mano). */
+  unusedLines: string[];
 }
 
 export interface Product {
   id: string;
   name: string;
   category: Category;
-  /** Variantes de nombre vistas en tickets (ya normalizadas). */
+  /** Variantes de nombre vistas en tickets (ya normalizadas), para emparejar automáticamente. */
   aliases: string[];
+  /** Cómo se llama este producto en cada supermercado, tal y como sale en el ticket. */
+  names?: Record<string, string[]>;
 }
 
 /** Último precio conocido de un producto en un supermercado (precio comunitario por zona). */
