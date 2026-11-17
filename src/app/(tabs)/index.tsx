@@ -7,6 +7,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { MonthlyBars } from '@/components/Charts';
 import { GlassButton, GlassCard, SectionHeader } from '@/components/Glass';
 import { ReceiptRow } from '@/components/ReceiptRow';
+import { UpdateBanner } from '@/components/UpdateBanner';
 import { Screen } from '@/components/Screen';
 import { optimizeBasket } from '@/core/basketOptimizer';
 import { monthlySpending, spendingByStore } from '@/core/stats';
@@ -60,6 +61,8 @@ export default function Home() {
         </Pressable>
       }
     >
+      <UpdateBanner />
+
       {!settings.onboardingDone && (
         <Animated.View entering={FadeInDown.duration(400)} style={{ marginBottom: space.lg }}>
           <GlassCard>

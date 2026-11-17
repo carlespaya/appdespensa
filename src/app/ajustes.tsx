@@ -6,7 +6,9 @@ import { ActivityIndicator, Pressable, StyleSheet, Switch, Text, TextInput, View
 
 import { Chip, GlassButton, GlassCard, SectionHeader } from '@/components/Glass';
 import { Screen } from '@/components/Screen';
+import { useAppUpdate } from '@/hooks/useAppUpdate';
 import { findNearbyChains } from '@/services/nearby';
+import { installedVersion, REPO } from '@/services/updates';
 import { useAppStore } from '@/store/useAppStore';
 import { colors, radius, space, type } from '@/theme/tokens';
 
@@ -55,6 +57,7 @@ export default function Settings() {
   const { settings, updateSettings, stores, updateStore, applyNearby, clearDemoData, clearHistory, receipts } = useAppStore();
   const [nearby, setNearby] = useState<{ loading: boolean; message?: string }>({ loading: false });
   const [confirmClear, setConfirmClear] = useState(false);
+  const appUpdate = useAppUpdate({ autoCheck: true });
   const demoCount = receipts.filter((r) => r.id.startsWith('demo-')).length;
   const sortedStores = [...stores].sort((a, b) => (a.distanceKm ?? 99) - (b.distanceKm ?? 99));
 
@@ -176,6 +179,42 @@ export default function Settings() {
         />
         <Pressable onPress={() => Linking.openURL('https://ocr.space/ocrapi/freekey')} style={{ marginTop: space.sm }}>
           <Text style={[type.caption, { color: colors.mint }]}>Conseguir clave gratuita →</Text>
+        </Pressable>
+      </GlassCard>
+
+      <SectionHeader title="Acerca de" />
+      <GlassCard>
+        <View style={styles.row}>
+          <View style={{ flex: 1 }}>
+            <Text style={type.body}>Versión {installedVersion()}</Text>
+            <Text style={type.caption}>
+              {!appUpdate.supported
+                ? 'Las actualizaciones se ofrecen en la app instalada (APK).'
+                : appUpdate.status === 'checking'
+                  ? 'Buscando…'
+                  : appUpdate.status === 'upToDate'
+                    ? 'Tienes la última versión.'
+                    : appUpdate.status === 'available' || appUpdate.status === 'downloading'
+                      ? `Hay una versión nueva: ${appUpdate.update?.version}`
+                      : appUpdate.status === 'error'
+                        ? appUpdate.error
+                        : 'Al abrir la app se comprueba si hay versión nueva.'}
+            </Text>
+          </View>
+        </View>
+        {appUpdate.supported &&
+          (appUpdate.status === 'available' || appUpdate.status === 'downloading' ? (
+            <GlassButton
+              label={appUpdate.status === 'downloading' ? `Descargando… ${Math.round(appUpdate.progress * 100)} %` : `Actualizar a la ${appUpdate.update?.version}`}
+              onPress={appUpdate.install}
+              disabled={appUpdate.status === 'downloading'}
+              style={{ marginTop: space.md }}
+            />
+          ) : (
+            <GlassButton label="Buscar actualizaciones" variant="ghost" onPress={() => appUpdate.check(true)} style={{ marginTop: space.md }} />
+          ))}
+        <Pressable onPress={() => Linking.openURL(`https://github.com/${REPO}/releases`)} style={{ marginTop: space.md }}>
+          <Text style={[type.caption, { color: colors.mint }]}>Ver todas las versiones en GitHub →</Text>
         </Pressable>
       </GlassCard>
 

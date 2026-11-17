@@ -18,7 +18,11 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.despensa.app"
+      "package": "com.despensa.app",
+      "permissions": [
+        "REQUEST_INSTALL_PACKAGES"
+      ],
+      "versionCode": 1
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -44,7 +48,10 @@
         {
           "locationWhenInUsePermission": "Despensa usa tu ubicación para calcular qué supermercados te quedan más cerca."
         }
-      ]
+      ],
+      "./plugins/withReleaseSigning",
+      "expo-font",
+      "expo-status-bar"
     ],
     "scheme": "despensa",
     "backgroundColor": "#060A14",
